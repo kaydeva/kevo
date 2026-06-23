@@ -15,6 +15,7 @@ export const JourneySection = () => {
   const prevMouseX = useRef(null);
   const isSeeking = useRef(false);
   const pendingTime = useRef(null);
+  const [shouldLoadVideo, setShouldLoadVideo] = useState(false);
   const [isDesktop, setIsDesktop] = useState(
     typeof window !== "undefined" ? window.innerWidth >= MOBILE_BREAKPOINT : true
   );
@@ -61,12 +62,29 @@ export const JourneySection = () => {
     return () => video.removeEventListener('seeked', onSeeked);
   }, [applyNextFrame]);
 
+  // ── Intersection Observer for Lazy Loading ──────────────────────────────
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setShouldLoadVideo(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '200px' } // Start preloading 200px before section enters viewport
+    );
+    if (sectionRef.current) {
+      observer.observe(sectionRef.current);
+    }
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     const handleResize = () => {
       const desktop = window.innerWidth >= MOBILE_BREAKPOINT;
       setIsDesktop(desktop);
       const video = videoRef.current;
-      if (!video) return;
+      if (!video || !shouldLoadVideo) return;
       if (!desktop) {
         video.loop = true;
         video.play().catch(() => {});
@@ -79,11 +97,14 @@ export const JourneySection = () => {
     handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  }, [shouldLoadVideo]);
 
   useEffect(() => {
+    let frameId = null;
+    let targetTime = null;
+
     const handleMouseMove = (e) => {
-      if (!isDesktop) return;
+      if (!isDesktop || !shouldLoadVideo) return;
       const video = videoRef.current;
       if (!video || !video.duration) return;
 
@@ -97,26 +118,38 @@ export const JourneySection = () => {
       prevMouseX.current = currentX;
 
       const scrubOffset = (delta / window.innerWidth) * SCRUB_SENSITIVITY * video.duration;
-      const targetTime = Math.min(
-        Math.max(video.currentTime + scrubOffset, 0),
+      
+      if (targetTime === null) {
+        targetTime = video.currentTime;
+      }
+      targetTime = Math.min(
+        Math.max(targetTime + scrubOffset, 0),
         video.duration
       );
 
-      if (isSeeking.current) {
-        pendingTime.current = targetTime;
-      } else {
-        isSeeking.current = true;
-        pendingTime.current = targetTime;
-        applyNextFrame();
+      if (!frameId) {
+        frameId = requestAnimationFrame(() => {
+          frameId = null;
+          if (video && targetTime !== null) {
+            if (isSeeking.current) {
+              pendingTime.current = targetTime;
+            } else {
+              isSeeking.current = true;
+              pendingTime.current = targetTime;
+              applyNextFrame();
+            }
+          }
+        });
       }
     };
 
     window.addEventListener('mousemove', handleMouseMove, { passive: true });
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
+      if (frameId) cancelAnimationFrame(frameId);
       prevMouseX.current = null;
     };
-  }, [isDesktop, applyNextFrame]);
+  }, [isDesktop, shouldLoadVideo, applyNextFrame]);
 
   // ── Cursor glow ──────────────────────────────────────────────────────────
   const mouseX = useMotionValue(typeof window !== 'undefined' ? window.innerWidth / 2 : 500);
@@ -142,7 +175,8 @@ export const JourneySection = () => {
       <div className="absolute inset-0 z-0">
         <video
           ref={videoRef}
-          src="/roboty.mp4"
+          src={shouldLoadVideo ? "/roboty.mp4" : undefined}
+          poster="/thinking-bot.png"
           muted
           playsInline
           preload="auto"

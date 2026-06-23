@@ -36,6 +36,12 @@ export const ParticleField = ({
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
 
+    // Extract base RGB components once to avoid regex operations inside the animation frame
+    const baseColorMatch = color.match(/rgba?\(([^,]+),\s*([^,]+),\s*([^,)]+)/);
+    const baseColor = baseColorMatch 
+      ? `rgb(${baseColorMatch[1]}, ${baseColorMatch[2]}, ${baseColorMatch[3]})`
+      : color;
+
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -51,32 +57,37 @@ export const ParticleField = ({
 
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fillStyle = color.replace(
-          /[\d.]+\)$/,
-          `${p.opacity})`
-        );
+        ctx.fillStyle = baseColor;
+        ctx.globalAlpha = p.opacity;
         ctx.fill();
       });
 
-      // Draw connection lines between nearby particles
-      for (let i = 0; i < particlesRef.current.length; i++) {
-        for (let j = i + 1; j < particlesRef.current.length; j++) {
-          const a = particlesRef.current[i];
+      // Draw connection lines between nearby particles using optimized squared distance checks
+      ctx.lineWidth = 0.5;
+      ctx.strokeStyle = baseColor;
+      
+      const len = particlesRef.current.length;
+      for (let i = 0; i < len; i++) {
+        const a = particlesRef.current[i];
+        for (let j = i + 1; j < len; j++) {
           const b = particlesRef.current[j];
-          const dist = Math.hypot(a.x - b.x, a.y - b.y);
-          if (dist < 120) {
+          const dx = a.x - b.x;
+          const dy = a.y - b.y;
+          const distSq = dx * dx + dy * dy;
+          
+          if (distSq < 14400) { // 120 * 120
+            const dist = Math.sqrt(distSq);
             ctx.beginPath();
             ctx.moveTo(a.x, a.y);
             ctx.lineTo(b.x, b.y);
-            ctx.strokeStyle = color.replace(
-              /[\d.]+\)$/,
-              `${0.08 * (1 - dist / 120)})`
-            );
-            ctx.lineWidth = 0.5;
+            ctx.globalAlpha = 0.08 * (1 - dist / 120);
             ctx.stroke();
           }
         }
       }
+      
+      // Reset globalAlpha to default
+      ctx.globalAlpha = 1.0;
 
       animFrameRef.current = requestAnimationFrame(draw);
     };

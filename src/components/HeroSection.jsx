@@ -34,14 +34,57 @@ export const HeroSection = ({ frameUrls }) => {
     [cursorX, cursorY]
   );
 
-  // Preload frames
+  // Staggered Preload frames
   useEffect(() => {
     if (!frameUrls?.length) return;
-    frameUrls.forEach((url, i) => {
+    
+    let isCancelled = false;
+    
+    // 1. Load the first frame immediately so it draws instantly
+    const loadFirstFrame = () => {
       const img = new Image();
-      img.src = url;
-      imagesRef.current[i] = img;
-    });
+      img.onload = () => {
+        if (!isCancelled) {
+          imagesRef.current[0] = img;
+        }
+      };
+      img.src = frameUrls[0];
+    };
+    
+    loadFirstFrame();
+
+    // 2. Load remaining frames in small deferred batches to prevent network congestion
+    const BATCH_SIZE = 15;
+    const DELAY_MS = 25;
+    let currentIdx = 1;
+
+    const loadNextBatch = () => {
+      if (isCancelled || currentIdx >= frameUrls.length) return;
+
+      const limit = Math.min(currentIdx + BATCH_SIZE, frameUrls.length);
+      for (let i = currentIdx; i < limit; i++) {
+        const img = new Image();
+        img.src = frameUrls[i];
+        imagesRef.current[i] = img;
+      }
+
+      currentIdx = limit;
+      
+      if (currentIdx < frameUrls.length) {
+        if (typeof window.requestIdleCallback === "function") {
+          window.requestIdleCallback(() => loadNextBatch(), { timeout: 100 });
+        } else {
+          setTimeout(loadNextBatch, DELAY_MS);
+        }
+      }
+    };
+
+    const initialTimeout = setTimeout(loadNextBatch, 150);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(initialTimeout);
+    };
   }, [frameUrls]);
 
   // Scroll tracking
@@ -206,10 +249,6 @@ export const HeroSection = ({ frameUrls }) => {
         />
 
         {/* ── Black overlay (exit transition) ────────────────────────── */}
-        <motion.div
-          style={{ opacity: blackOverlay }}
-          className="absolute inset-0 bg-black pointer-events-none z-[9]"
-        />
 
         {/* ── Title & Subtitle ───────────────────────────────────────── */}
         <motion.div
